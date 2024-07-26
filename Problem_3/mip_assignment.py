@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 import gurobipy
 import argparse
+import numpy as np
 
 
 class SimpleNN(torch.nn.Module):
@@ -45,11 +46,10 @@ class Verifier:
             x_vars: A list of input variables with initial upper and lower bounds created.
         """
         for i in range(len(x_test)):
-            # TODO : Append to x_vars - a list of variable having lower and upper bounds
-            # TODO : Hint - Use .addVar in gurobipy
+            # Done : Append to x_vars - a list of variable having lower and upper bounds
+            # Done : Hint - Use .addVar in gurobipy
             # YOUR CODE HERE
-            # self.x_vars.append(self.gurobi_model.addVar(...))
-            pass
+            self.x_vars.append(self.gurobi_model.addVar(lb=x_test[i] - perturbation, ub=x_test[i] + perturbation, vtype=gurobipy.GRB.CONTINUOUS))
         self.gurobi_model.update()
         print(f"Created {len(self.x_vars)} input variables")
         return self.x_vars
@@ -75,10 +75,10 @@ class Verifier:
         # Pre-activation variables z.
         z = self.gurobi_model.addVars(output_size, lb=float('-inf'), ub=float('inf'))
         self.gurobi_model.update()
-        # TODO : Add constraints for variable z representing the output of the layer before activation i.e. wx + b
+        # Done : Add constraints for variable z representing the output of the layer before activation i.e. wx + b
         for i in range(output_size):
-            # YOUR CODE HERE
-            pass
+            expr = np.dot(weight[i], list(input_vars)) + bias[i]
+            self.gurobi_model.addConstr(z[i] == expr)
         self.gurobi_model.update()
         print(f"Created linear layer with input shape {input_size} output shape {output_size}")
         return z.values()
@@ -106,14 +106,27 @@ class Verifier:
         p_vars = self.gurobi_model.addVars(n_inputs, vtype=gurobipy.GRB.BINARY)
         self.gurobi_model.update()
 
-        # TODO: Model ReLU activation as piecewise linear constraints in MIP.
+        # Done: Model ReLU activation as piecewise linear constraints in MIP.
         # You need to handle three cases for each neuron based on its pre-activation bounds:
         # active (always positive), inactive (always non-positive), and unstable (can be either).
         # Hint - Use .addConstr() and Refer section 4.1 of the paper
         n_unstable = 0
         for i in range(n_inputs):
-            # YOUR CODE HERE
-            pass
+            if lower_bounds[i] >= 0: #Active
+                self.gurobi_model.addConstr(hatz_vars[i] == z[i])
+            elif upper_bounds[i] <= 0: #Inactive
+                self.gurobi_model.addConstr(hatz_vars[i] == 0)
+            else: # Unstable: lower_bounds[i] < 0 and upper_bounds[i] > 0
+                # hatz_vars[i] <= z[i] - lower_bounds[i] * (1 - p_vars[i])
+                # hatz_vars[i] >= z[i]
+                # hatz_vars[i] <= upper_bounds[i] * p_vars[i]
+                # hatz_vars[i] >= 0
+                # p_vars[i] \in {0,1}
+                self.gurobi_model.addConstr(hatz_vars[i] <= z[i] - lower_bounds[i] * (1 - p_vars[i]))
+                self.gurobi_model.addConstr(hatz_vars[i] >= z[i])
+                self.gurobi_model.addConstr(hatz_vars[i] <= upper_bounds[i] * p_vars[i])
+                self.gurobi_model.addConstr(hatz_vars[i] >= 0)
+                n_unstable += 1
 
         self.gurobi_model.update()
 
@@ -142,24 +155,23 @@ class Verifier:
                 optimal_vars.append(None)
                 continue
             start_time = time.time()
-            # TODO : Add Gurobi objectives to the model
+            # Done : Add Gurobi objectives to the model
             # Implement the objective solving step, where you optimize the verification objectives
             # under the current model constraints. This step is essential for finding potential adversarial examples
             # that satisfy the input constraints and maximize the output difference from the expected label.
             # Hint - direction can either be 'minimzation' or 'maximization' and use self.gurobi_model.setObjective
             if direction == 'minimization':
-                # YOUR CODE HERE
-                # self.gurobi_model.setObjective(...)
-                pass
+                self.gurobi_model.setObjective(objectives[i], gurobipy.GRB.MINIMIZE)
             elif direction == 'maximization':
-                # YOUR CODE HERE
-                pass
+                self.gurobi_model.setObjective(objectives[i], gurobipy.GRB.MAXIMIZE)
             else:
                 raise ValueError(direction)
             self.gurobi_model.optimize()
             # In production-ready code, you should can check for infeasible solutions, timeout, etc here.
-            # TODO: Check if gurobi model is at optimal status
-            assert True # YOUR CODE HERE
+            # Done: Check if gurobi model is at optimal status
+            if self.gurobi_model.status != gurobipy.GRB.Status.OPTIMAL:
+                print(f'Objective {i} {direction} is {self.gurobi_model.status}')
+                raise Exception(f'Objective {i} {direction} is {self.gurobi_model.status}')
 
             optimal_objs.append(self.gurobi_model.objVal)
             optimal_vars.append([vars.X for vars in self.x_vars])
@@ -184,7 +196,7 @@ class Verifier:
 
         objectives = []
         target_labels = []
-        # TODO : Formulate the verification objectives for the MIP model.
+        # Done : Formulate the verification objectives for the MIP model.
         # This involves setting up the optimization targets to assess the neural network's output
         # robustness against input perturbations, particularly focusing on how changes in input
         # can lead to incorrect classifications.
@@ -192,12 +204,12 @@ class Verifier:
             target_labels.append(i)
             if i == groundtruth_label:
                 # YOUR CODE HERE
-                # objectives.append(...)
-                pass
+                objectives.append(None)
+                continue
             # Optimization objective we want to minimize.
-            # TODO : append objective that needs to be minimized, think about the original label and the one after perturbation
+            # Done : append objective that needs to be minimized, think about the original label and the one after perturbation
             # YOUR CODE HERE
-            # objectives.append(...)
+            objectives.append(y_vars[groundtruth_label] - y_vars[i])
 
         return objectives, target_labels
 
