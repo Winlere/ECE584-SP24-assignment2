@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class BoundLinear(nn.Linear):
-    def __init(self, in_features, out_features, bias=True):
+    def __init__(self, in_features, out_features, bias=True):
         super(BoundLinear, self).__init__(in_features, out_features, bias)
 
     @staticmethod
