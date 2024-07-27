@@ -89,6 +89,7 @@ class BoundedSequential(nn.Sequential):
                     # starting from layer i-1
                     ub, lb = self.boundpropogate_from_layer(x_U=x_U, x_L=x_L, C=newC, upper=True, lower=True,
                                                             start_node=i - 1)
+                    # print(f"Layer {i} Passed. lb={lb} ub={ub}")
                 # Set pre-activation bounds for layer i (the ReLU layer)
                 modules[i].upper_u = ub
                 modules[i].lower_l = lb
@@ -125,6 +126,7 @@ class BoundedSequential(nn.Sequential):
             upper_A, upper_b, lower_A, lower_b = module.boundpropogate(upper_A, lower_A, start_node)
             upper_sum_b = upper_b + upper_sum_b
             lower_sum_b = lower_b + lower_sum_b
+            # print(f"Reversely visit {module}")
 
         # sign = +1: upper bound, sign = -1: lower bound
         def _get_concrete_bound(A, sum_b, sign=-1):
@@ -146,6 +148,8 @@ class BoundedSequential(nn.Sequential):
             ub = x_U.new([np.inf])
         if lb is None:
             lb = x_L.new([-np.inf])
+        assert torch.le(lb, ub).all(), f"lb <= ub not hold. \nlb: {lb} \nub: {ub}. \non {torch.gt(lb, ub)}. \n layer: {self}"
+        # print("Passed Sanity Assersion")
         return ub, lb
 
 
