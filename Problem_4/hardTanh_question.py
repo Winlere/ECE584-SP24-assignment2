@@ -18,6 +18,7 @@ class BoundHardTanh(nn.Hardtanh):
         """
         # Done: Return the converted HardTanH
         l = BoundHardTanh(act_layer.min_val, act_layer.max_val, act_layer.inplace)
+        assert act_layer.min_val == -1 and act_layer.max_val == 1, "HardTanh bounds are not -1 and 1"
         return l
 
     def boundpropogate(self, last_uA, last_lA, start_node=None):
@@ -74,12 +75,12 @@ class BoundHardTanh(nn.Hardtanh):
             lower_b[masks_below_min] = upper_b[masks_below_min] = self.min_val
             del masks_below_min #avoid mistakes
             
-            masks_between = (preact_ub > self.min_val) & (preact_ub < self.max_val)
+            masks_between = (preact_lb > self.min_val) & (preact_ub < self.max_val)
             lower_d[masks_between] = upper_d[masks_between] = 1
             lower_b[masks_between] = upper_b[masks_between] = 0
             del masks_between
             
-            masks_above_max = preact_ub >= self.max_val
+            masks_above_max = preact_lb >= self.max_val
             lower_d[masks_above_max] = upper_d[masks_above_max] = 0
             lower_b[masks_above_max] = upper_b[masks_above_max] = self.max_val
             del masks_above_max
@@ -87,14 +88,14 @@ class BoundHardTanh(nn.Hardtanh):
         def _abstraction_1(): #cover exactly one step point
             masks_cover_min = (preact_lb <= self.min_val) & (preact_ub >= self.min_val) & (preact_ub < self.max_val)
             upper_d[masks_cover_min] = (preact_ub[masks_cover_min] - (-1)) / (preact_ub[masks_cover_min] - preact_lb[masks_cover_min])
-            upper_b[masks_cover_min] = -1 * preact_lb[masks_cover_min] * upper_d[masks_cover_min] - 1
+            upper_b[masks_cover_min] = -1 * preact_ub[masks_cover_min] * upper_d[masks_cover_min] + preact_ub[masks_cover_min]
             lower_d[masks_cover_min] = upper_d[masks_cover_min] # optimizable,
             lower_b[masks_cover_min] = lower_d[masks_cover_min] - 1
             del masks_cover_min
 
             masks_cover_max = (preact_lb > self.min_val) & (preact_lb <= self.max_val) & (preact_ub >= self.max_val)
             lower_d[masks_cover_max] = (1 - preact_lb[masks_cover_max]) / (preact_ub[masks_cover_max] - preact_lb[masks_cover_max])
-            lower_b[masks_cover_max] = -1 * preact_ub[masks_cover_max] * lower_d[masks_cover_max] + 1
+            lower_b[masks_cover_max] = -1 * preact_lb[masks_cover_max] * lower_d[masks_cover_max] + preact_lb[masks_cover_max]
             upper_d[masks_cover_max] = lower_d[masks_cover_max] # optimizable
             upper_b[masks_cover_max] = -1 * preact_lb[masks_cover_max] + 1
             del masks_cover_max
