@@ -3,8 +3,8 @@ import torch.nn as nn
 
 
 class BoundHardTanh(nn.Hardtanh):
-    def __init__(self):
-        super(BoundHardTanh, self).__init__()
+    def __init__(self,*args, **kwargs):
+        super(BoundHardTanh, self).__init__(*args, **kwargs)
 
     @staticmethod
     def convert(act_layer):
@@ -16,8 +16,9 @@ class BoundHardTanh(nn.Hardtanh):
         Returns:
             l (BoundHardTanh): The converted layer object.
         """
-        # TODO: Return the converted HardTanH
-        pass
+        # Done: Return the converted HardTanH
+        l = BoundHardTanh(act_layer.min_val, act_layer.max_val, act_layer.inplace)
+        return l
 
     def boundpropogate(self, last_uA, last_lA, start_node=None):
         """
@@ -46,6 +47,8 @@ class BoundHardTanh(nn.Hardtanh):
         preact_lb = self.lower_l
         preact_ub = self.upper_u
 
+        preact_ub = torch.max(preact_ub, preact_lb + 1e-8) 
+        # still sound, avoid division by 0
         """
          Hints: 
          1. Have a look at the section 3.2 of the CROWN paper [1] (Case Studies) as to how segments are made for multiple activation functions
@@ -58,6 +61,85 @@ class BoundHardTanh(nn.Hardtanh):
         # You should return the linear lower and upper bounds after propagating through this layer.
         # Upper bound: uA is the coefficients, ubias is the bias.
         # Lower bound: lA is the coefficients, lbias is the bias.
+        
+        upper_d = torch.zeros_like(preact_ub) # slope
+        upper_b = torch.zeros_like(preact_ub) 
+        
+        lower_d = torch.zeros_like(preact_ub) # slope
+        lower_b = torch.zeros_like(preact_ub) 
+        
+        def _abstraction_0(): # cover no step point
+            masks_below_min = preact_ub <= self.min_val
+            lower_d[masks_below_min] = upper_d[masks_below_min] = 0
+            lower_b[masks_below_min] = upper_b[masks_below_min] = self.min_val
+            del masks_below_min #avoid mistakes
+            
+            masks_between = (preact_ub > self.min_val) & (preact_ub < self.max_val)
+            lower_d[masks_between] = upper_d[masks_between] = 1
+            lower_b[masks_between] = upper_b[masks_between] = 0
+            del masks_between
+            
+            masks_above_max = preact_ub >= self.max_val
+            lower_d[masks_above_max] = upper_d[masks_above_max] = 0
+            lower_b[masks_above_max] = upper_b[masks_above_max] = self.max_val
+            del masks_above_max
+        
+        def _abstraction_1(): #cover exactly one step point
+            masks_cover_min = (preact_lb <= self.min_val) & (preact_ub >= self.min_val) & (preact_ub < self.max_val)
+            upper_d[masks_cover_min] = (preact_ub[masks_cover_min] - (-1)) / (preact_ub[masks_cover_min] - preact_lb[masks_cover_min])
+            upper_b[masks_cover_min] = -1 * preact_lb[masks_cover_min] * upper_d[masks_cover_min] - 1
+            lower_d[masks_cover_min] = upper_d[masks_cover_min] # optimizable,
+            lower_b[masks_cover_min] = lower_d[masks_cover_min] - 1
+            del masks_cover_min
+
+            masks_cover_max = (preact_lb > self.min_val) & (preact_lb <= self.max_val) & (preact_ub >= self.max_val)
+            lower_d[masks_cover_max] = (1 - preact_lb[masks_cover_max]) / (preact_ub[masks_cover_max] - preact_lb[masks_cover_max])
+            lower_b[masks_cover_max] = -1 * preact_ub[masks_cover_max] * lower_d[masks_cover_max] + 1
+            upper_d[masks_cover_max] = lower_d[masks_cover_max] # optimizable
+            upper_b[masks_cover_max] = -1 * preact_lb[masks_cover_max] + 1
+            del masks_cover_max
+        
+        def _abstraction_2(): #cover exactly two step points
+            masks_cover_min_max = (preact_lb <= self.min_val) & (preact_ub >= self.max_val)
+            upper_d[masks_cover_min_max] = (1 - (-1)) / (1 - preact_lb[masks_cover_min_max]) # optimizable
+            upper_b[masks_cover_min_max] = -1 * upper_d[masks_cover_min_max] + 1
+            lower_d[masks_cover_min_max] = (1 - (-1)) / (preact_ub[masks_cover_min_max] - (-1)) # optimizable
+            lower_b[masks_cover_min_max] = lower_d[masks_cover_min_max] - 1
+            del masks_cover_min_max
+
+        _abstraction_0() # cover no step point
+        _abstraction_1() # cover exactly one step point
+        _abstraction_2() # cover exactly two step points
+
+        uA = lA = None
+        ubias = lbias = 0
+        # Should be last_uA.shape=torch.Size([2, 64, 128]), upper_d.shape=torch.Size([2, 1, 128]), upper_b.shape=torch.Size([2, 128])
+        # print(f"last_uA.shape={last_uA.shape}, upper_d.shape={upper_d.shape}, upper_b.shape={upper_b.shape}")
+        upper_d = upper_d.unsqueeze(1)
+        lower_d = lower_d.unsqueeze(1)
+
+        if last_uA is not None:
+            pos_uA = last_uA.clamp(min=0)
+            neg_uA = last_uA.clamp(max=0)
+            # Choose upper or lower bounds based on the sign of last_A
+            # New linear bound coefficent.
+            uA = upper_d * pos_uA + lower_d * neg_uA
+            # New bias term. Adjust shapes to use matmul (better way is to use einsum).
+            mult_uA_pos = pos_uA.view(last_uA.size(0), last_uA.size(1), -1)
+            mult_uA_neg = neg_uA.view(last_uA.size(0), last_uA.size(1), -1)
+            ubias =         mult_uA_pos.matmul(upper_b.view(upper_b.size(0), -1, 1)).squeeze(-1)
+            ubias = ubias + mult_uA_neg.matmul(lower_b.view(lower_b.size(0), -1, 1)).squeeze(-1)
+        if last_lA is not None:
+            pos_lA = last_lA.clamp(min=0)
+            neg_lA = last_lA.clamp(max=0)
+            # Choose upper or lower bounds based on the sign of last_A
+            # New linear bound coefficent.
+            lA = upper_d * neg_lA + lower_d * pos_lA
+            # New bias term. Adjust shapes to use matmul (better way is to use einsum).
+            mult_lA_pos = pos_lA.view(last_lA.size(0), last_lA.size(1), -1)
+            mult_lA_neg = neg_lA.view(last_lA.size(0), last_lA.size(1), -1)
+            lbias =         mult_lA_pos.matmul(lower_b.view(lower_b.size(0), -1, 1)).squeeze(-1)
+            lbias = lbias + mult_lA_neg.matmul(upper_b.view(upper_b.size(0), -1, 1)).squeeze(-1)
 
         return uA, ubias, lA, lbias
 
