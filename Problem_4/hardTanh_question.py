@@ -48,7 +48,7 @@ class BoundHardTanh(nn.Hardtanh):
         preact_lb = self.lower_l
         preact_ub = self.upper_u
 
-        preact_ub = torch.max(preact_ub, preact_lb + 1e-8) 
+        preact_ub = torch.max(preact_ub, preact_lb + 1e-10) 
         # still sound, avoid division by 0
         """
          Hints: 
@@ -111,6 +111,30 @@ class BoundHardTanh(nn.Hardtanh):
         _abstraction_0() # cover no step point
         _abstraction_1() # cover exactly one step point
         _abstraction_2() # cover exactly two step points
+        
+        def _abnormal_detect():
+            print(f"preact_lb={preact_lb}\n preact_ub={preact_ub}")
+            print(f"upper_d={upper_d}\n upper_b={upper_b}")
+            print(f"lower_d={lower_d}\n lower_b={lower_b}")
+            test_val = (preact_lb + preact_ub) / 2
+            print(f"test_val={test_val}")
+            ub_eval = upper_d * test_val + upper_b
+            lb_eval = lower_d * test_val + lower_b
+            print(f"ub_eval={ub_eval}\n lb_eval={lb_eval}")
+            abnormal = torch.gt(lb_eval, ub_eval + 1e-4)
+            print(f"abnormal {abnormal}")
+            print(f"abnormal_preact_lb={preact_lb[abnormal]}\n abnormal_preact_ub={preact_ub[abnormal]}")
+            print(f"abnormal_upper_d={upper_d[abnormal]}\n abnormal_upper_b={upper_b[abnormal]}")
+            print(f"abnormal_lower_d={lower_d[abnormal]}\n abnormal_lower_b={lower_b[abnormal]}")
+            print(f"abnormal_test_val={test_val[abnormal]}")
+            print(f"abnormal_ub_eval={ub_eval[abnormal]}\n abnormal_lb_eval={lb_eval[abnormal]}")
+            assert torch.le(lb_eval, ub_eval + 1e-4).all(), f"lb <= ub not hold. \nlb: {lb_eval} \nub: {ub_eval}. \non {torch.gt(lb_eval, ub_eval)}. \n layer: {self}"
+    
+        # lower_b = torch.ones_like(lower_b) * -2
+        # lower_d = torch.ones_like(lower_d) * 0
+        
+        # upper_b = torch.ones_like(upper_b) * 2
+        # upper_d = torch.ones_like(upper_d) * 0
 
         uA = lA = None
         ubias = lbias = 0
@@ -118,7 +142,7 @@ class BoundHardTanh(nn.Hardtanh):
         # print(f"last_uA.shape={last_uA.shape}, upper_d.shape={upper_d.shape}, upper_b.shape={upper_b.shape}")
         upper_d = upper_d.unsqueeze(1)
         lower_d = lower_d.unsqueeze(1)
-
+        
         if last_uA is not None:
             pos_uA = last_uA.clamp(min=0)
             neg_uA = last_uA.clamp(max=0)
