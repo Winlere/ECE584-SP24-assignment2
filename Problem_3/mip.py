@@ -288,10 +288,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # Add the 'data' argument
     parser.add_argument('data_file', type=str, help='model input x_test loaded from file (e.g., data1.pth)')
+    parser.add_argument('--perturbation', type=float, help='perturbation value', default=0.01, required=False)
     # Parse the command line arguments
     args = parser.parse_args()
     model, x_test, groundtruth_label = load_model_and_data(args.data_file)
     start_time = time.time()
-    result = verify(model, x_test, groundtruth_label, perturbation=0.01)
+    result = verify(model, x_test, groundtruth_label, perturbation=args.perturbation)
     verification_time = time.time() - start_time
     print(f'Verification result: {result} in {verification_time} seconds')
