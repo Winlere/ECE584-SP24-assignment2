@@ -154,7 +154,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-a', '--activation', default='relu', choices=['relu', 'hardtanh'],
                         type=str, help='Activation Function')
+    parser.add_argument('-t', '--test', action='store_true', help='Run the self-check test',
+                        required=False, default=False)
+    parser.add_argument('-eps', '--epsilon', type=float, default=0.1, help='Pertubation',
+                        required=False)
     parser.add_argument('data_file', type=str, help='input data, a tensor saved as a .pth file.')
+    
     # Parse the command line arguments
     args = parser.parse_args()
 
@@ -170,12 +175,14 @@ if __name__ == '__main__':
         model.load_state_dict(torch.load('models/hardtanh_model.pth'))
 
     batch_size = x_test.size(0)
+    eps = args.epsilon
     x_test = x_test.reshape(batch_size, -1)
+    if args.test:
+        print(f"Running Self-Check Test")
+        x_test = eps * 2 * (torch.randn_like(x_test).clamp(min=0,max=1) - 0.5) + x_test
     output = model(x_test)
     y_size = output.size(1)
     print("Network prediction: {}".format(output))
-
-    eps = 0.01
     x_u = x_test + eps
     x_l = x_test - eps
 
@@ -188,3 +195,18 @@ if __name__ == '__main__':
             print('f_{j}(x_{i}): {l:8.4f} <= f_{j}(x_{i}+delta) <= {u:8.4f}'.format(
                 j=j, i=i, l=lb[i][j].item(), u=ub[i][j].item()))
 
+    def selfcheck():
+        new_x_test = eps * 2 * (torch.randn_like(x_test).clamp(min=0,max=1) - 0.5) + x_test
+        new_output = model(new_x_test)
+        
+        for i in range(batch_size):
+            for j in range(y_size):
+                if not (lb[i][j] - 1e-4 <= new_output[i][j] <= ub[i][j] + 1e-4):
+                    print('f_{j}(x_{i}): {l:8.4f} <= {val} <= {u:8.4f}'.format(
+                        j=j, i=i, l=lb[i][j].item(), u=ub[i][j].item(), val=new_output[i][j]))
+                assert lb[i][j] - 1e-4 <= new_output[i][j] <= ub[i][j] + 1e-4
+    
+    if args.test:
+        for i in range(100):
+            selfcheck()
+        print(f"Passed All Self-Check Test")
