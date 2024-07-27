@@ -97,7 +97,7 @@ class BoundHardTanh(nn.Hardtanh):
             lower_d[masks_cover_max] = (1 - preact_lb[masks_cover_max]) / (preact_ub[masks_cover_max] - preact_lb[masks_cover_max])
             lower_b[masks_cover_max] = -1 * preact_lb[masks_cover_max] * lower_d[masks_cover_max] + preact_lb[masks_cover_max]
             upper_d[masks_cover_max] = lower_d[masks_cover_max] # optimizable
-            upper_b[masks_cover_max] = -1 * preact_lb[masks_cover_max] + 1
+            upper_b[masks_cover_max] = -1 * upper_d[masks_cover_max] + 1
             del masks_cover_max
         
         def _abstraction_2(): #cover exactly two step points
